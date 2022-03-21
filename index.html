@@ -1,0 +1,915 @@
+<!doctype html>
+<html>
+	<head>
+		<meta charset="utf-8">
+		<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+
+		<title>Deploying Terraform to Multiple Environments</title>
+
+		<link rel="stylesheet" href="dist/reset.css">
+		<link rel="stylesheet" href="dist/reveal.css">
+		<link rel="stylesheet" href="dist/theme/black.css">
+
+		<!-- Theme used for syntax highlighted code -->
+		<link rel="stylesheet" href="plugin/highlight/monokai.css">
+		<style>
+			.slides > section:nth-child(2) {
+				width: auto;
+				margin-left: -5vw;
+			}
+		</style>
+	</head>
+	<body>
+		<div class="reveal">
+			<div class="slides">
+				<section
+					data-background-image="Terraform_logo.png"
+					data-background-position="left bottom"
+					data-background-size="300px"
+					data-background-opacity="0.4"
+				>
+					<h1>Deploying with <a href="https://www.terraform.io/">Terraform</a> in Multiple Environments</h1>
+					<p>
+						<a href="https://identity.rackspace.corp/Finder?u=tim2957">Tim Farrell</a> &middot; SDE 3 &middot; Platform Experience
+					</p>
+				</section>
+				<section
+					data-background-image="Wizard Profile.png"
+					data-background-position="right 100px bottom"
+					data-background-size="600px"
+				>
+					<h2>About Me</h2>
+					<ul>
+						<li>4 year Racker</li>
+						<li>15 year full-stack developer</li>
+						<li>8-Bit Squad Leader
+							<ul>
+								<li>Astra (login.rackspace.com)</li>
+								<li>Pilot (Customer Portal Navigation Bar)</li>
+								<li>RNS (Customer Email Notifications)</li>
+								<li>Kevalin (Customer Activity Audit)</li>
+							</ul>
+						</li>
+					</ul>
+				</section>
+				<section
+					data-background-image="astra_frontpage.jpg"
+					data-background-position="left 1em bottom 1em"
+					data-background-size="600px"
+					data-background-opacity="0.8"
+				>
+					<h2>Story time</h2>
+					<aside class="notes">
+						<p>
+							In Dec 2020, we were requested to add tags to all of our cloud assets. We initially didn't think much of the request because our infrastructure was already managed by terraform and we applied certain tags to our assets.
+						</p>
+						<p>
+							However, through a magic combination of terraform versioning, and how the different accounts and environments were setup, it was not something would easily do.
+						</p>
+						<p>
+							To support the requested tags, we would need to upgrade terraform versions. To upgrade terraform versions, we would need to change many of the third-party modules we were using. The patterns of those modules were slightly different so our infrastructure assets would be either renamed or recreated. While terraform is amazing, the Amazon API is not and things occasionally break. There was no way that I could guarantee customer uptime through this process by doing a "cold-turkey" switch.
+						</p>
+						<p>
+							This small request for a few tags snowballed into an effort that took several months. But in those months I learned a lot and I want to share some of that with you today.
+						</p>
+					</aside>
+				</section>
+				<section>
+					<h2>Overview</h2>
+					<ul>
+						<li>Walkthrough setting up a basic project with Terraform</li>
+						<li>Add remote state to the project</li>
+						<li>Add multiple environments to the project</li>
+						<li>Talk about larger projects</li> 
+					</ul>
+					<aside class="notes">
+						<p>
+							Today we're going to walk though setting up terraform for use in a basic project, add remote state to that project, add multiple environments and finally talk about what to do if your project grows more complex.
+						</p>
+					</aside>
+				</section>
+				<section>
+					<section
+						data-background-image="HTML5_logo.png"
+						data-background-position="left bottom"
+						data-background-size="300px"
+						data-background-opacity="0.4"
+					>
+						<h2>Project Setup</h2>
+						<ul>
+							<li>Frontend-only webapp</li>
+							<li class="fragment">Code assets
+								<ul>
+									<li><em>src/index.html</em></li>
+									<li><em>src/index.js</em></li>
+								</ul>
+							</li>
+							<li class="fragment">Infrastructure assets
+								<ul>
+									<li>AWS Account</li>
+									<li>S3 bucket configured for serving static files</li>
+									<li>Uploaded code assets to the bucket
+								</ul>
+							</li>
+						</ul>
+						<aside class="notes">
+							<p>
+								Let's first describe an example project. This project will be a frontend-only webapp. As such it will have just the basics, an html file and a javascript file.
+							</p>
+							<hr/>
+							<p>
+								Periodically, I'll show you snippets of the file structure to highlight how things change. This is where we are right now. Assuming modern browser techniques, we don't need a package bundler.
+							</p>
+							<hr/>
+							<p>
+								Aside from typing out some code into files, we have also gone into the AWS console and created some infrastructure assets: an AWS account (with API credentials), an S3 bucket that we've configured to serve our static files to the public internet, and we've uploaded our files into this bucket.
+							</p>
+						</aside>
+					</section>
+				</section>
+
+				<section>
+					<section
+						data-background-image="Terraform_logo.png"
+						data-background-position="left bottom"
+						data-background-size="300px"
+						data-background-opacity="0.4"
+					>
+						<h2>Define your Infrastructure</h2>
+						<h6>(in code)</h6>
+						<ul>
+							<li class="fragment">
+								Resources:
+								<ul>
+									<li>S3 Bucket</li>
+									<li>Uploaded files as bucket objects</li>
+								</ul>
+							</li>
+							<li class="fragment">Terraform files in <em>infrastructure/main.tf</em></li>
+						</ul>
+						<aside class="notes">
+							<p>
+								We want to define our infrastructure assets in terraform code. We'll need to configure our command-line so terraform can use our AWS credentials. (However, to setup your AWS access key in your terminal is a bit outside of what I'd like to cover. If you need help with that, we can talk afterward.)
+							</p>
+							<hr/>
+							<p>
+								So we'll need to define our S3 bucket, configure it for public web access and define our files as S3 objects.
+							</p>
+							<hr/>
+							<p>
+								We'll create a separate sub-directory in our repository for infrastructure things. Some people like for these files to be in the repository root, but I like to keep things cleanly separated. For now, we'll define our assets in <em>infrastructure/main.tf</em>
+							</p>
+						</aside>
+					</section>
+					<section
+						data-background-image="s3_logo.png"
+						data-background-position="left 20px bottom 20px"
+						data-background-size="300px"
+						data-background-opacity="0.3"
+					>
+						<h3>S3 Bucket &middot; <em>main.tf</em></h3>
+						<pre><code data-trim data-noescape class="tf">
+							provider aws {}
+
+							resource "aws_s3_bucket" "this" {
+								bucket = "mr_bucket"
+								acl    = "public-read"
+							}
+
+							resource "aws_s3_bucket_website_configuration" "this" {
+								bucket = aws_s3_bucket.this.bucket
+
+								index_document {
+									suffix = "index.html"
+								}
+							}
+						</code></pre>
+						<aside class="notes">
+							<p>
+								Here is an abbreviated version of the terraform code used to define and configure an S3 bucket for public website access.
+							</p>
+						</aside>
+					</section>
+					<section
+						data-background-image="s3_logo.png"
+						data-background-position="left 20px bottom 20px"
+						data-background-size="300px"
+						data-background-opacity="0.3"
+					>
+						<h3>Uploaded files &middot; <em>main.tf</em></h3>
+						<pre><code data-trim data-noescape class="tf">
+						resource "aws_s3_object" "files" {
+							for_each = fileset("src/", "*")
+
+							bucket = aws_s3_bucket.this.bucket
+							key    = each.value
+							source = "src/${each.value}"
+							etag = filemd5("src/${each.value}")
+						}
+						</code></pre>
+						<aside class="notes">
+							<p>
+								Likewise, we want to define every file in our <em>src</em> directory as something to be uploaded to our S3 bucket.
+							</p>
+
+							----------- leadup to next --------
+
+							<p>
+								If we try to apply our defined resources to our AWS account right now, it will fail. The reason is because everything we've described in code already exists in our account. Terraform will throw an error and fail.
+							</p>
+							<p>
+								We have two options: remove our assets from our AWS account and then let terraform create them, or we can import them into the Terraform state. I prefer to import them because we get to keep our current assets and we get to learn about manipulating the Terraform state.
+							</p>
+						</aside>
+					</section>
+					<section
+						data-background-image="Terraform_logo.png"
+						data-background-position="left bottom"
+						data-background-size="300px"
+						data-background-opacity="0.4"
+					>
+						 <h2>Terraform State</h2>
+						 <ul>
+						 	<li>Remembers the state of your defined infrastructure resources the way they were last time you applied changes.</li>
+						 	<li>Gets updated every time you run a <pre><code class="sh">terraform apply</code></pre></li>
+						 	<li>Stored in a local file by default &middot <em>terraform.tfstate</em></li>
+						 </ul>
+						 <aside class="notes">
+						 	<p>
+						 		The terraform state remembers the state of things the last time you applied changes and it also gets updated each time to run <pre><code class="sh">terraform apply</code></pre>. This sounds like I'm saying the same thing but there's a subtle difference. By remembering the state of things, terraform can detect anything that has changed outside of the terraform system since the last deployment as well as remember what changes were applied.
+						 	</p>
+						 	<p>
+						 		This state gets stored in a local <em>terraform.tfstate</em> file by default.
+						 	</p>
+						 </aside>
+					</section>
+					<section
+						data-background-image="Terraform_logo.png"
+						data-background-position="left bottom"
+						data-background-size="300px"
+						data-background-opacity="0.4"
+					>
+						<h3>Import our existing assets</h3>
+
+						<pre><code class="sh" data-trim data-noescape data-line-numbers="1|2-57">
+						terraform -chdir=infrastructure init
+						terraform -chdir=infrastructure import aws_s3_bucket.this \
+							"mr_bucket"
+
+						terraform -chdir=infrastructure import \
+							"aws_s3_object.files[\"index.html\"]"" \
+							"s3://mr_bucket/index.html"
+						</code></pre>
+						<aside class="notes">
+						 	<p>
+						 		Before we can use terraform, we need to <em>initialize</em> our terraform repository much like how we do with git. 
+						 	</p>
+						 	<p>
+						 		After running the first line, we've initialized our repo and we're ready to import our resources. 
+						 	</p>
+						 	<hr>
+						 	<p>
+						 		Each different resource type has its own import identifier signature. Here, I've given some examples for how to import resources.
+						 	</p>
+						 </aside>
+					</section>
+					<section
+						data-background-image="Terraform_logo.png"
+						data-background-position="left bottom"
+						data-background-size="300px"
+						data-background-opacity="0.4"
+					>
+						<h3>Situation Recap</h3>
+
+						<pre><code class="text" data-trim data-noescape data-line-numbers="|7">
+						src/
+							index.html
+							index.js
+
+						infrastructure/
+							main.tf
+							terraform.tfstate
+						</code></pre>
+						<aside class="notes">
+							<p>
+								Now our project looks like this.
+							</p>
+							<hr>
+							<p>
+								<em>terraform.tfstate</em> is our new file that contains our terraform state.
+							</p>
+						</aside>
+					</section>
+				</section>
+				<section>
+					<section
+						data-background-image="Terraform_logo.png"
+						data-background-position="left bottom"
+						data-background-size="300px"
+						data-background-opacity="0.4"
+					>
+						<h2>Add a buddy</h2>
+						<h6>(remotify your state)</h6>
+						<aside class="notes">
+							<p>
+								So our project is getting some traction. You need to add logging, frontend caching, and some DNS records. You've enlisted the help of a teammate but how do you share a consistent state? The tfstate file is designed to be local. To solve this problem we setup some additional infrastructure to use terraform's remote backend state feature.
+							</p>
+						</aside>
+					</section>
+					<section
+						data-background-image="Terraform_logo.png"
+						data-background-position="left bottom"
+						data-background-size="300px"
+						data-background-opacity="0.4"
+					>
+						<h2>Terraform Remote Backend State</h2>
+						<ul>
+							<li>
+								Needs its own infrastructure
+								<ul>
+									<li>DynamoDB table for locks</li>
+									<li>S3 Bucket for state</li>
+								</ul>
+							</li>
+							<li class="fragment">Configuration specified in <em>infrastructure/conf.tf</em></li>
+						</ul>
+						 <aside class="notes">
+						 	<p>
+						 		I'm going to breeze through this but the short thing to know is that we can setup a separate bucket and a dynamodb table to store our terraform state remotely and keep it synced between different users.
+						 	</p>
+						 	<hr>
+						 	<p>
+						 		To do so, we need to configure our remote state in <em>infrastructure/conf.tf</em> and then push our local state up to the cloud.
+						 	</p>
+						 </aside>
+					</section>
+					<section
+						data-background-image="Terraform_logo.png"
+						data-background-position="left bottom"
+						data-background-size="300px"
+						data-background-opacity="0.4"
+						data-markdown
+					>
+						<textarea data-template>
+						### conf.tf
+
+						```tf
+						terraform {
+							backend "s3" {
+								bucket         = "mr-bucket-tf-state"
+								key            = "terraform.tfstate"
+								dynamodb_table = "mr-bucket-tf-lock"
+							}
+						}
+
+						```
+
+						Notes: We're going to add a `conf.tf` file that looks like this. And since we're going through this section quickly, we're going to assume that we already have another bucket and dynamo table created. There are scripts to set this up easily available on the web.
+
+						---
+						### Push your state to the cloud
+
+						```sh
+						terraform -chdir=infrastructure state push
+						rm infrastructure/terraform.tfstate
+						```
+
+						Notes: And so we push our existing state to the cloud and remove our local state.
+ 						</textarea>
+					</section>
+					<section
+						data-background-image="Terraform_logo.png"
+						data-background-position="left bottom"
+						data-background-size="300px"
+						data-background-opacity="0.4"
+					>
+						<h3>Situation Recap</h3>
+
+						<pre><code class="text" data-trim data-noescape data-line-numbers="|6">
+						src/
+							index.html
+							index.js
+
+						infrastructure/
+							conf.tf
+							main.tf
+						</code></pre>
+						<aside class="notes">
+							<p>
+								Here's our situation now that we've moved our state to the cloud...
+							</p>
+							<hr>
+							<p>
+								and replaced it with a configuration file pointing terraform to where it can be found. Now we're ready to share our development environment with our teammates.
+							</p>
+						</aside>
+					</section>
+				</section>
+				<section>
+					<section
+						data-background-image="Terraform_logo.png"
+						data-background-position="left bottom"
+						data-background-size="300px"
+						data-background-opacity="0.4"
+					>
+						<h3>(Terraform) Best Practices</h3>
+						<aside class="notes">
+							Before we can go on, we need to talk about some terraform best practices. As we get into how to structure more complicated projects, best practices will be our guide.
+						</aside>
+					</section>
+					<section
+						data-background-image="Terraform_logo.png"
+						data-background-position="left bottom"
+						data-background-size="300px"
+						data-background-opacity="0.4"
+					>
+						<h4>One (cloud) account per app environment</h4>
+						<ul>
+							<li class="fragment">
+								Stability 
+							</li>
+							<li class="fragment">
+								Security
+							</li>
+							<li class="fragment">
+								Analytics
+							</li>
+						</ul>
+						<aside class="notes">
+							<p>
+								The first one is having one cloud account per app environment. What this means is that our project uses one aws account for its production environment and a separate account for the test environment. If we were to add a staging environment ...you guessed it...we would need another AWS account. Having these distinct accounts provides you...
+							</p>
+							<hr/>
+							<p>
+								...stability because you need a place to develop and test infrastructure configurations that shouldn't be even remotely close to your production code.
+							</p>
+							<hr>
+							<p>
+								Another benefit is...simpler security because its far less difficult to segregate users by account than within an account.
+							</p>
+							<hr>
+							<p>
+								It also provides you...easier analytics because all of your production costs and usage data are confined to one account making them easier to analyse.
+							</p>
+						</aside>
+					</section>
+					<section
+						data-background-image="Terraform_logo.png"
+						data-background-position="left bottom"
+						data-background-size="300px"
+						data-background-opacity="0.4"
+						data-markdown
+					>
+						<textarea data-template>
+							#### Small repositories
+
+							(refactorable) <!-- .element: class="fragment" -->
+													
+							Notes: The next "best practice" to talk about is keeping small repositories. "Small" here is relative. I'll try to explain what I mean by going back to the story about Astra.
+
+							Astra was originally configured as one terraform repository. When I needed to jump from one terraform version to the next, I was forced to deal with all of the assets changing at once. Astra is not your average bear. It has:
+
+								- fargate containers
+								- load balancers
+								- lambdas
+								- DNS records
+								- dynamo tables
+								- kinesis streams
+								- cloudwatch logs
+								- and I'm probably forgetting some things (secretsmanager)
+
+
+							If Astra was originally built as it is now, I could update the lambda definitions without needing to worry the fargate definitions.
+							
+							--
+
+							The point is, if you can't manage a syntax-breaking major version upgrade, then consider breaking your repository into smaller, separate repos. By separate, I mean with their own individual state bucket objects.
+
+							---
+							#### Limited External Modules
+
+							(understand the tradeoff) <!-- .element: class="fragment" -->
+
+							Notes: I'm not totally against using external modules in terraform but they are the same trap that you run into with any declaritive infrastructure management tool. If they change, your infrastructure may need a large rewrite to accomodate the change. Suddenly all the time you saved by using the convenience module up front, gets swallowed up in maintenance costs.
+
+							-- 
+
+							For Terraform, stick with provider resources as much as development time allows.
+
+							---
+							#### Tags
+
+							- Help you keep track of things
+							- [There is a tagging standard](https://one.rackspace.com/pages/viewpage.action?pageId=532306599)
+							- Tag your unmanaged infrastructure assets
+
+							Notes: Tags are just a darn-good idea. Besides, there is a standard. AWS console also allows you to search by tags. If you tag your unmanaged infrastructure assets, it makes them easier to find later if you need to find undeclared infrastructure assets.
+						</textarea>
+					</section>
+				</section>
+				<section>
+					<section
+						data-background-image="Terraform_logo.png"
+						data-background-position="left bottom"
+						data-background-size="300px"
+						data-background-opacity="0.4"
+					>
+						<h3>Multi-Environment Methods</h3>
+						<ul>
+							<li class="fragment">
+								Hard-code more resources for each environment
+							</li>
+							<li class="fragment">
+								Variable maps for each environment keyed to named workspaces
+							</li>
+							<li class="fragment">
+								Use distinct root directories for each environment
+							</li>
+						</ul>
+						<aside class="notes">
+							<p>
+								We're finally here. Our app is gaining traction but we haven't finished all that we set out to do before. Consider what might happen if we try to setup a caching infrastructure. If we put that in front of our production setup anything but a perfect configuration the first time will result in downtime. Assuming our current setup is production, how do we setup a "test" environment. Some options are:
+							</p>
+							<hr>
+							<p>
+								We could copy and paste all of our code, but that would violate the separate accounts best practice.
+							</p>
+							<hr>
+							<p>
+								We could have variable maps for each environment and use keyed workspaces but this makes for a lot of boilerplate and some brittle architecture if you try to split things apart. It's also complicated to setup with multiple accounts. This is how Astra used to be configured.
+							</p>
+							<hr>
+							<p>
+								The best method I've found is to have a distinct root directory for each environment. Before we can appreciate the benefits, let's look a little deeper into workspaces...
+							</p>
+						</aside>
+					</section>
+					<section
+						data-background-image="Terraform_logo.png"
+						data-background-position="left bottom"
+						data-background-size="300px"
+						data-background-opacity="0.4"
+					>
+						<h3>Workspaces</h3>
+						<ul>
+							<li>Unique state per workspace in a repository</li>
+							<li>Shares the <a href="https://www.terraform.io/language/state/workspaces#when-to-use-multiple-workspaces">same configuration</a> across workspaces</li>
+						</ul>
+						<aside class="notes">
+							<p>
+								Workspaces provide a unique state per workspace within one repository root. So far in our example project, we have not specified a workspace. Terraform assumes the "default" workspace so that's the one we've been using for our webapp. However, if we were to have a "prod" and a "test" workspace, then we could have unique state and share one repo. But this configuration is not ideal because of our options to specify environment-specific values.
+							</p>
+						</aside>
+
+					</section>
+					<section
+						data-background-image="Terraform_logo.png"
+						data-background-position="left bottom"
+						data-background-size="300px"
+						data-background-opacity="0.4"
+					>
+						<h4>To specify environment-specific variables you have 2 options:</h4>
+						<ul>
+							<li class="fragment">Match tfvars on the command line with configured workspace.</li>
+							<li class="fragment">Match the workspace name with a mapping of default values in your variables file.</li>
+						</ul>
+						<pre class="fragment"><code data-trim data-noescape  data-line-numbers="1-7|9" class="tf"> 
+							variable "name_map" {
+								type = map[string]
+								default = {
+									test = "test_webapp"
+									prod = "prod_webapp"
+								}
+							}
+
+							name = name_map[terraform.workspace]
+						</code></pre>
+						<aside class="notes">
+							<p>
+								There are 2 ways to specify values with workspaces in an environment-specific way.
+							</p>
+							<hr>
+							<p>
+								You could create tfvars files for each environment and pass those in on the command line. This is brittle because if you're working on the command line, you may have forgotten which workspace you're in unless you just changed or checked. Even Hashicorp does not recommend this method.
+							</p>
+							<hr>
+							<p>
+								The second method is to specify all your values as default map values in your variables file at the root of your repository and access them keyed to the workspace name. Each value would need to be written like this:
+							</p>
+							<hr>
+							<p>
+								...and accessed like this:
+							</p>
+							<hr>
+							<p>Holy boilerplate batman! (Remember, this is how Astra used to be setup!)</p>
+						</aside>
+					</section>
+					<section
+						data-background-image="Terraform_logo.png"
+						data-background-position="left bottom"
+						data-background-size="300px"
+						data-background-opacity="0.4"
+					>
+						<h3>Environment Root dir</h3>
+
+						<ul>
+							<li>Per-environment variables tightly coupled to their environment</li>
+							<li>Per-environment variables lack boilerplate</li>
+							<li>Common resources are still accessible to each environment</li>
+							<li>Each environment has total control to include any or all parts of shared assets from other environments</li>
+							<li>Terminals often display current directory.</li>
+						</ul>
+						<aside class="notes">
+							<p>
+								And now we come to the method that strikes the right balance. Having a folder for each environment that serves as the repository root, we gain several advantages over other methods: (read the bullets)
+							</p>
+						</aside>
+					</section>
+					<section
+						data-background-image="Terraform_logo.png"
+						data-background-position="left bottom"
+						data-background-size="300px"
+						data-background-opacity="0.4"
+					>
+						<h3>Environment Root dir</h3>
+
+						<pre><code class="text" data-trim data-noescape data-line-numbers="|6,8,12|10,14|3|9,13">
+						src/*
+						infrastructure/
+							main.tf
+							variables.tf
+
+							environments/
+
+								prod/
+									main.tf
+									conf.tf
+
+								test/
+									main.tf
+									conf.tf
+						</code></pre>
+						<aside class="notes">
+							<p>
+								Here are the steps for how to convert our previous situation to using per-environment roots.
+							</p>
+							<hr>
+							<p>
+								Create the directories. I like to put my environment roots inside a containing _environments_ directory but that's not required.
+							</p>
+							<hr>
+							<p>
+								Next, copy your existing conf file to your new _prod_ and _test_ directories. Be sure to change the values inside to point to the correct bucket and dynamodb table for that environment.
+							</p>
+							<hr>
+							<p>
+								You can leave your existing _main.tf_ file in place with the understanding that this is *not* a repository root (this is the only not-obvious thing about this setup but can be mitigated with a big comment at the beginning of the file).
+							</p>
+							<hr>
+							<p>
+								With all of our current assets in the main.tf file on line 3, what goes in the environment root main files? For the most part, this is a simple module call back to the main.tf file on line 3. It would look like:
+							</p>
+						</aside>
+					</section>
+					<section
+						data-background-image="Terraform_logo.png"
+						data-background-position="left bottom"
+						data-background-size="300px"
+						data-background-opacity="0.4"
+					>
+						<h4>infrastructure/environments/prod/main.tf</h4>
+
+						<pre><code class="tf" data-trim data-noescape data-line-numbers="1,2,5|4">
+						module "main" {
+						  source = "../../"
+
+						  environment = "prod"
+						}
+						</code></pre>
+						<aside class="notes">
+							<p>
+								By referencing the main.tf file in the infrastructure directory, we can share all the code that would be common to all environments.
+							</p>
+							<hr>
+							<p>
+								We can also pass environment-specific variables to the "main" module here in an efficient and tightly-coupled manner. You'll need to populate the variables file in order for the main module to receive them.
+							</p>
+						</aside>
+					</section>
+					<section
+						data-background-image="Terraform_logo.png"
+						data-background-position="left bottom"
+						data-background-size="300px"
+						data-background-opacity="0.4"
+					>
+						<h4>Invoking Terraform</h4>
+
+						<pre><code class="sh" data-trim data-noescape data-line-numbers="1">
+						ENV=prod terraform -chdir=infrastructure/${ENV} init
+						ENV=prod terraform -chdir=infrastructure/${ENV} plan
+						ENV=prod terraform -chdir=infrastructure/${ENV} init
+						</code></pre>
+						<aside class="notes">
+							<p>
+								Since we've moved our terraform repository root, we also change how we call terraform. I prefer to specify the environment as a terminal environment variable and pass `chdir` to terraform. this way I only have three scripts defined in my package.json file instead of environments * 3 scripts if everything was statically included.
+							</p>
+						</aside>
+					</section>
+				</section>
+				<section>
+					<section
+						data-background-image="Terraform_logo.png"
+						data-background-position="left bottom"
+						data-background-size="300px"
+						data-background-opacity="0.4"
+					>
+						<h3 class="fragment">Let's go bigger!</h3>
+						<ul class="fragment">
+							<li>More Environment Roots</li>
+						</ul>
+						<aside class="notes">
+							<p>
+								Are we done?
+							</p>
+							<hr>
+							<p>
+								No! Remember our best practices? What if this method gets bigger than a refactorable chunk? We add more environment roots!
+							</p>
+						</aside>
+					</section>
+					<!-- <section
+						data-background-image="Terraform_logo.png"
+						data-background-position="left bottom"
+						data-background-size="300px"
+						data-background-opacity="0.4"
+					>
+						<h4>Component modules</h4>
+
+						<pre><code class="text" data-trim data-noescape data-line-numbers="6-10">
+						src/*
+						infrastructure/
+							main.tf
+							variables.tf
+
+							modules/
+								dns/
+									main.tf
+									variables.tf
+									output.tf
+
+							environments/
+
+								prod/
+									main.tf
+									conf.tf
+
+								test/
+									main.tf
+									conf.tf
+						</code></pre>
+						<aside class="notes">
+							<p>
+								But first a quick look at how component modules fit into this structure.Slot them in next to environments so they can be easily referenced from either the main module or an environment root.
+							</p>
+						</aside>
+					</section> -->
+					<section
+						data-background-image="Terraform_logo.png"
+						data-background-position="left bottom"
+						data-background-size="300px"
+						data-background-opacity="0.4"
+					>
+						<h4>More Environment Roots</h4>
+
+						<pre><code class="text" data-trim data-noescape data-line-numbers="9,13,17,21|">
+						src/*
+						infrastructure/
+							modules/
+								dns/
+									main.tf
+									variables.tf
+
+							environments/
+								prod_dns/
+									main.tf
+									conf.tf
+
+								prod_s3/
+									main.tf
+									conf.tf
+
+								test_dns/
+									main.tf
+									conf.tf
+
+								test_s3/
+									main.tf
+									conf.tf
+						</code></pre>
+						<aside class="notes">
+							<p>
+								For each self-contained area of infrastructure, we add a directory suffix. This setup has a few nuances to it. First, we could add another directory level. I've chosen to recommend a suffix because most terminals show your most immediate directory. If you're in that directory it is always obvious what environment you're in.
+							</p>
+							<hr>
+							<p>
+								 The next nuance is that we've done away with the root module. Since we're focusing on parts of the whole, different environments should reference modules directly in order to reuse code.
+							</p>
+						</aside>
+					</section>
+					<section
+						data-background-image="terragrunt.png"
+						data-background-position="left 1em bottom 1em"
+						data-background-size="300px"
+						data-background-opacity="0.4"
+					>
+						<h4>That's too messy</h4>
+
+						<ul>
+							<li class="fragment">Not likely a problem in a development context</li>
+							<li class="fragment">Not difficult to write a script to do it once in CI/CD.</li>
+							<li class="fragment">If these solutions are burdensome, there are tools such as <a href="https://terragrunt.gruntwork.io/">Terragrunt</a> which may be a better fit</li>
+						</ul>
+
+						<aside class="notes">
+							<p>
+								It might seem messy to just say "run terraform more times in more places", but the wisdom is built into the same reasons that we break up large repositories of other types. If you consider the access patterns for this setup, it works pretty well.
+							</p>
+							<hr>
+							<p>
+								 In a development context, you're likely only working in one account at a time. If you find yourself hopping between accounts a lot, then prehaps your modules need to be reorganized.
+							</p>
+							<hr>
+							<p>
+								 In CI/CD, you specify them once and run them a lot.
+							</p>
+							<hr>
+							<p>
+								 Finally, there are terraform wrappers like terragrunt to help you abstract away some of the repetition of larger numbers of repository roots. Under the hood, terragrunt organizes things very similar to what I've described here.
+							</p>
+						</aside>
+					</section>
+				</section>
+				<section
+					data-background-image="Terraform_logo.png"
+					data-background-position="left bottom"
+					data-background-size="300px"
+					data-background-opacity="0.4"
+				>
+					<h3>Circling Back</h3>
+					<ul>
+						<li>Terraform has several ways to split infrastructure state and assets across environments.</li>
+						<li>Remember best practices when organizing your code.</li>
+						<li>Picking the right structure can help you avoid pain when needing to expand or refactor your code.</li>
+					</ul>
+					
+					<aside class="notes">
+						(read the bullets)
+					</aside>
+				</section>
+				<section
+					data-background-image="Wizard Profile.png"
+					data-background-position="right 1em bottom 1em"
+					data-background-size="300px"
+					data-background-opacity="0.4"
+				>
+					<h2>Shameless Plug</h2>
+
+					<a href="https://github.com/RSS-Engineering/terraform/">https://github.com/RSS-Engineering/terraform/</a>
+				</section>
+				<section
+					data-background-image="Wizard Profile.png"
+					data-background-position="right 1em bottom 1em"
+					data-background-size="300px"
+					data-background-opacity="0.4"
+				>
+					<h2>Sources</h2>
+					<ul>
+						<li><a href="https://www.terraform.io/cloud-docs/guides/recommended-practices">https://www.terraform.io/cloud-docs/guides/recommended-practices</a></li>
+						<li><a href="https://www.terraform-best-practices.com/">https://www.terraform-best-practices.com/</a></li>
+						<li><a href="https://www.terraform.io/language/state/workspaces#when-to-use-multiple-workspaces">https://www.terraform.io/language/state/workspaces#when-to-use-multiple-workspaces</a></li>
+					</ul>
+				</section>
+			</div>
+		</div>
+
+		<script src="dist/reveal.js"></script>
+		<script src="plugin/notes/notes.js"></script>
+		<script src="plugin/markdown/markdown.js"></script>
+		<script src="plugin/highlight/highlight.js"></script>
+		<script src="terraform.js"></script>
+		<script>
+			// More info about initialization & config:
+			// - https://revealjs.com/initialization/
+			// - https://revealjs.com/config/
+			Reveal.initialize({
+				hash: true,
+				highlight: {
+					beforeHighlight: hljs => hljs.registerLanguage('terraform', window.hljsDefineTerraform)
+				},
+
+				// Learn about plugins: https://revealjs.com/plugins/
+				plugins: [ RevealMarkdown, RevealHighlight, RevealNotes ]
+			});
+		</script>
+	</body>
+</html>
